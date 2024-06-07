@@ -5,6 +5,8 @@
 #include <cstdlib>
 #include <matplot/matplot.h>
 #include <cmath>
+#include <time.h>
+#include <thread>
 
 #include <Eigen/Dense>
 #include <SDL.h>

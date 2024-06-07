@@ -16,8 +16,8 @@ Eigen::MatrixXf LQR(PlanarQuadrotor& quadrotor, float dt) {
     Eigen::Vector2f input = quadrotor.GravityCompInput();
 
     Q.diagonal() << 0.005, 0.005, 400, 0.01, 0.05, 0.25 / 2 / M_PI;
-    R.row(0) << 30, 7;
-    R.row(1) << 7, 30;
+    R.row(0) << 30, 10;
+    R.row(1) << 10, 30;
 
     std::tie(A, B) = quadrotor.Linearize();
     A_discrete = Eye + dt * A;
@@ -33,6 +33,7 @@ void control(PlanarQuadrotor& quadrotor, const Eigen::MatrixXf& K) {
 
 int main(int argc, char* args[])
 {
+    time_t start = time(0);
     std::shared_ptr<SDL_Window> gWindow = nullptr;
     std::shared_ptr<SDL_Renderer> gRenderer = nullptr;
     const int SCREEN_WIDTH = 1280;
@@ -57,12 +58,12 @@ int main(int argc, char* args[])
     */
     Eigen::VectorXf goal_state = Eigen::VectorXf::Zero(6);
 
+
     quadrotor.SetGoal(initial_state);
     /* Timestep for the simulation */
     const float dt = 0.01;
     Eigen::MatrixXf K = LQR(quadrotor, dt);
     Eigen::Vector2f input = Eigen::Vector2f::Zero(2);
-
     /**
      * TODO: Plot x, y, theta over time
      * 1. Update x, y, theta history vectors to store trajectory of the quadrotor
@@ -78,13 +79,25 @@ int main(int argc, char* args[])
         bool quit = false;
         float delay;
         int x, y;
+        float x_plot, y_plot, theta_plot;
         Eigen::VectorXf state = Eigen::VectorXf::Zero(6);
-
+        Eigen::Vector2f new_goal = Eigen::Vector2f::Zero(2);
+        int n = 1;
         while (!quit)
         {
-            //events
             while (SDL_PollEvent(&e) != 0)
             {
+                Eigen::VectorXf z_plot = quadrotor.GetState();
+                x_plot = z_plot[0];
+                y_plot = z_plot[1];
+                theta_plot = z_plot[2];
+                double plot_insertion_timer = difftime(time(0), start);
+                if (plot_insertion_timer >= n) {
+                    x_history.push_back(x_plot);
+                    y_history.push_back(y_plot);
+                    theta_history.push_back(theta_plot);
+                    n++;
+                }
                 if (e.type == SDL_QUIT)
                 {
                     quit = true;
@@ -95,7 +108,31 @@ int main(int argc, char* args[])
                     goal_state << x, y, 0, 0, 0, 0;
                     quadrotor.SetGoal(goal_state);
                 }
+                else if (e.type == SDL_KEYUP) {
+                    if (e.key.keysym.sym == SDLK_p) {
+                        double seconds_since_start = difftime(time(0), start);\
+                            std::vector<double> time_history = linspace(0, seconds_since_start);
+                        std::cout << time_history.size() << std::endl;
 
+                        tiledlayout(3, 1);
+                        auto ax1 = nexttile();
+                        auto p1 = plot(ax1, time_history, x_history, "-o");
+                        xlabel(ax1, "time");
+                        ylabel(ax1, "x");
+
+                        auto ax2 = nexttile();
+                        auto p2 = plot(ax2, time_history, y_history, "--xr");
+                        xlabel(ax2, "time");
+                        ylabel(ax2, "y");
+
+                        auto ax3 = nexttile();
+                        auto p3 = plot(ax3, time_history, theta_history, "-:gr");
+                        xlabel(ax3, "time");
+                        ylabel(ax3, "theta");
+
+                        show();
+                    }
+                }
             }
 
             SDL_Delay((int)dt * 1000);
@@ -103,12 +140,10 @@ int main(int argc, char* args[])
             SDL_SetRenderDrawColor(gRenderer.get(), 0xFF, 0xFF, 0xFF, 0xFF);
             SDL_RenderClear(gRenderer.get());
 
-            /* Quadrotor rendering step */
             quadrotor_visualizer.render(gRenderer);
 
             SDL_RenderPresent(gRenderer.get());
 
-            /* Simulate quadrotor forward in time */
             control(quadrotor, K);
             quadrotor.Update(dt);
         }
