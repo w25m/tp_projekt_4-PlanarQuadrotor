@@ -1,170 +1,197 @@
-/**
- * SDL window creation adapted from https://github.com/isJuhn/DoublePendulum
-*/
-#include "simulate.h"
+#include "planar_quadrotor.h"
+#include <iostream>
+#include <random>
 
-Eigen::MatrixXf LQR(PlanarQuadrotor& quadrotor, float dt) {
-    /* Calculate LQR gain matrix */
-    Eigen::MatrixXf Eye = Eigen::MatrixXf::Identity(6, 6);
-    Eigen::MatrixXf A = Eigen::MatrixXf::Zero(6, 6);
-    Eigen::MatrixXf A_discrete = Eigen::MatrixXf::Zero(6, 6);
-    Eigen::MatrixXf B(6, 2);
-    Eigen::MatrixXf B_discrete(6, 2);
-    Eigen::MatrixXf Q = Eigen::MatrixXf::Identity(6, 6);
-    Eigen::MatrixXf R = Eigen::MatrixXf::Identity(2, 2);
-    Eigen::MatrixXf K = Eigen::MatrixXf::Zero(6, 6);
-    Eigen::Vector2f input = quadrotor.GravityCompInput();
+PlanarQuadrotor::PlanarQuadrotor() {
+    std::random_device r;
+    std::default_random_engine generator(r());
+    std::normal_distribution<float> distribution(0.0, 1.0);
+    auto gaussian = [&](int) { return distribution(generator); };
 
-    Q.diagonal() << 0.005, 0.005, 400, 0.01, 0.05, 0.25 / 2 / M_PI;
-    R.row(0) << 30, 10;
-    R.row(1) << 10, 30;
+    z = Eigen::VectorXf::NullaryExpr(6, gaussian);
 
-    std::tie(A, B) = quadrotor.Linearize();
-    A_discrete = Eye + dt * A;
-    B_discrete = dt * B;
-
-    return LQR(A_discrete, B_discrete, Q, R);
-}
-
-void control(PlanarQuadrotor& quadrotor, const Eigen::MatrixXf& K) {
-    Eigen::Vector2f input = quadrotor.GravityCompInput();
-    quadrotor.SetInput(input - K * quadrotor.GetControlState());
-}
-
-int main(int argc, char* args[])
-{
-    time_t start = time(0);
-    std::shared_ptr<SDL_Window> gWindow = nullptr;
-    std::shared_ptr<SDL_Renderer> gRenderer = nullptr;
-    const int SCREEN_WIDTH = 1280;
-    const int SCREEN_HEIGHT = 720;
-
-
-    /**
-     * TODO: Extend simulation
-     * 1. Set goal state of the mouse when clicking left mouse button (transform the coordinates to the quadrotor world! see visualizer TODO list)
-     *    [x, y, 0, 0, 0, 0]
-     * 2. Update PlanarQuadrotor from simulation when goal is changed
-    */
-    Eigen::VectorXf initial_state = Eigen::VectorXf::Zero(6);
-    initial_state << SCREEN_WIDTH / 2, SCREEN_HEIGHT / 2, 0, 0, 0, 0;
-
-    PlanarQuadrotor quadrotor(initial_state);
-    PlanarQuadrotorVisualizer quadrotor_visualizer(&quadrotor);
-    /**
-     * Goal pose for the quadrotor
-     * [x, y, theta, x_dot, y_dot, theta_dot]
-     * For implemented LQR controller, it has to be [x, y, 0, 0, 0, 0]
-    */
-    Eigen::VectorXf goal_state = Eigen::VectorXf::Zero(6);
-
-
-    quadrotor.SetGoal(initial_state);
-    /* Timestep for the simulation */
-    const float dt = 0.01;
-    Eigen::MatrixXf K = LQR(quadrotor, dt);
-    Eigen::Vector2f input = Eigen::Vector2f::Zero(2);
-    /**
-     * TODO: Plot x, y, theta over time
-     * 1. Update x, y, theta history vectors to store trajectory of the quadrotor
-     * 2. Plot trajectory using matplot++ when key 'p' is clicked
-    */
-    std::vector<float> x_history;
-    std::vector<float> y_history;
-    std::vector<float> theta_history;
-    using namespace matplot;
-    if (init(gWindow, gRenderer, SCREEN_WIDTH, SCREEN_HEIGHT) >= 0)
-    {
-        SDL_Event e;
-        bool quit = false;
-        float delay;
-        int x, y;
-        float x_plot, y_plot, theta_plot;
-        Eigen::VectorXf state = Eigen::VectorXf::Zero(6);
-        Eigen::Vector2f new_goal = Eigen::Vector2f::Zero(2);
-        int n = 1;
-        while (!quit)
-        {
-            while (SDL_PollEvent(&e) != 0)
-            {
-                Eigen::VectorXf z_plot = quadrotor.GetState();
-                x_plot = z_plot[0];
-                y_plot = z_plot[1];
-                theta_plot = z_plot[2];
-                double plot_insertion_timer = difftime(time(0), start);
-                if (plot_insertion_timer >= n) {
-                    x_history.push_back(x_plot);
-                    y_history.push_back(y_plot);
-                    theta_history.push_back(theta_plot);
-                    n++;
-                }
-                if (e.type == SDL_QUIT)
-                {
-                    quit = true;
-                }
-                else if (e.type == SDL_MOUSEBUTTONDOWN)
-                {
-                    SDL_GetMouseState(&x, &y);
-                    goal_state << x, y, 0, 0, 0, 0;
-                    quadrotor.SetGoal(goal_state);
-                }
-                else if (e.type == SDL_KEYUP) {
-                    if (e.key.keysym.sym == SDLK_p) {
-                        double seconds_since_start = difftime(time(0), start);\
-                            std::vector<double> time_history = linspace(0, seconds_since_start);
-                        std::cout << time_history.size() << std::endl;
-
-                        tiledlayout(3, 1);
-                        auto ax1 = nexttile();
-                        auto p1 = plot(ax1, time_history, x_history, "-o");
-                        xlabel(ax1, "time");
-                        ylabel(ax1, "x");
-
-                        auto ax2 = nexttile();
-                        auto p2 = plot(ax2, time_history, y_history, "--xr");
-                        xlabel(ax2, "time");
-                        ylabel(ax2, "y");
-
-                        auto ax3 = nexttile();
-                        auto p3 = plot(ax3, time_history, theta_history, "-:gr");
-                        xlabel(ax3, "time");
-                        ylabel(ax3, "theta");
-
-                        show();
-                    }
-                }
-            }
-
-            SDL_Delay((int)dt * 1000);
-
-            SDL_SetRenderDrawColor(gRenderer.get(), 0xFF, 0xFF, 0xFF, 0xFF);
-            SDL_RenderClear(gRenderer.get());
-
-            quadrotor_visualizer.render(gRenderer);
-
-            SDL_RenderPresent(gRenderer.get());
-
-            control(quadrotor, K);
-            quadrotor.Update(dt);
-        }
+    // Inicjalizacja SDL2 dla audio
+    if (SDL_Init(SDL_INIT_AUDIO) < 0) {
+        std::cerr << "SDL nie mogło się zainicjalizować! SDL_Error: " << SDL_GetError() << std::endl;
+        std::exit(1);
     }
+
+    // Załaduj plik dźwiękowy
+    if (SDL_LoadWAV("D:\\syf\\mixkit-drone-logo-presentation-2751.wav", &wav_spec, &wav_buffer, &wav_length) == NULL) {
+        std::cerr << "Nie udalo sie zaladować pliku dzwiekowego! SDL_Error: " << SDL_GetError() << std::endl;
+        std::exit(1);
+    }
+
+    // Otwórz urządzenie audio
+    device_id = SDL_OpenAudioDevice(NULL, 0, &wav_spec, NULL, 0);
+    if (device_id == 0) {
+        std::cerr << "Nie udalo sie otworzyc urzadzenia audio! SDL_Error: " << SDL_GetError() << std::endl;
+        SDL_FreeWAV(wav_buffer);
+        SDL_Quit();
+        std::exit(1);
+    }
+}
+
+PlanarQuadrotor::PlanarQuadrotor(Eigen::VectorXf z) : z(z) {
+    // Inicjalizacja SDL2 dla audio
+    if (SDL_Init(SDL_INIT_AUDIO) < 0) {
+        std::cerr << "SDL nie moglo sie zainicjalizowac! SDL_Error: " << SDL_GetError() << std::endl;
+        std::exit(1);
+    }
+
+    // Załaduj plik dźwiękowy
+    if (SDL_LoadWAV("D:\\syf\\mixkit-drone-logo-presentation-2751.wav", &wav_spec, &wav_buffer, &wav_length) == NULL) {
+        std::cerr << "Nie udalo sie zaladować pliku dzwiekowego! SDL_Error: " << SDL_GetError() << std::endl;
+        std::exit(1);
+    }
+
+    // Otwórz urządzenie audio
+    device_id = SDL_OpenAudioDevice(NULL, 0, &wav_spec, NULL, 0);
+    if (device_id == 0) {
+        std::cerr << "Nie udalo sie otworzyc urzadzenia audio! SDL_Error: " << SDL_GetError() << std::endl;
+        SDL_FreeWAV(wav_buffer);
+        SDL_Quit();
+        std::exit(1);
+    }
+}
+
+PlanarQuadrotor::~PlanarQuadrotor() {
+    // Zwolnij plik dźwiękowy
+    SDL_CloseAudioDevice(device_id);
+    SDL_FreeWAV(wav_buffer);
+
+    // Zamknij SDL
     SDL_Quit();
-    return 0;
 }
 
-int init(std::shared_ptr<SDL_Window>& gWindow, std::shared_ptr<SDL_Renderer>& gRenderer, const int SCREEN_WIDTH, const int SCREEN_HEIGHT)
-{
-    if (SDL_Init(SDL_INIT_VIDEO) >= 0)
-    {
-        SDL_SetHint(SDL_HINT_RENDER_SCALE_QUALITY, "1");
-        gWindow = std::shared_ptr<SDL_Window>(SDL_CreateWindow("Planar Quadrotor", SDL_WINDOWPOS_UNDEFINED, SDL_WINDOWPOS_UNDEFINED, SCREEN_WIDTH, SCREEN_HEIGHT, SDL_WINDOW_SHOWN), SDL_DestroyWindow);
-        gRenderer = std::shared_ptr<SDL_Renderer>(SDL_CreateRenderer(gWindow.get(), -1, SDL_RENDERER_ACCELERATED), SDL_DestroyRenderer);
-        SDL_SetRenderDrawColor(gRenderer.get(), 0xFF, 0xFF, 0xFF, 0xFF);
-    }
-    else
-    {
-        std::cout << "SDL_ERROR: " << SDL_GetError() << std::endl;
-        return -1;
-    }
-    return 0;
+void PlanarQuadrotor::SetGoal(Eigen::VectorXf z_goal) {
+    this->z_goal = z_goal;
 }
+
+void PlanarQuadrotor::SetInput(Eigen::Vector2f input) {
+    this->input = input;
+}
+
+Eigen::VectorXf PlanarQuadrotor::GetState() {
+    return z;
+}
+
+Eigen::VectorXf PlanarQuadrotor::GetControlState() {
+    return z - z_goal;
+}
+
+Eigen::Vector2f PlanarQuadrotor::GravityCompInput() {
+    /* Extract parameters */
+    float m = params[0];
+    float I = params[1];
+    float r = params[2];
+    float g = params[3];
+
+    return Eigen::Vector2f::Constant(m * g / 2);
+}
+
+std::tuple<Eigen::MatrixXf, Eigen::MatrixXf> PlanarQuadrotor::Linearize() {
+    /* Extract parameters */
+    float m = params[0];
+    float I = params[1];
+    float r = params[2];
+    float g = params[3];
+
+    Eigen::VectorXf z_star = Eigen::VectorXf::Zero(6);
+    float x = z_star[0];
+    float y = z_star[1];
+    float theta = z_star[2];
+    float x_dot = z_star[3];
+    float y_dot = z_star[4];
+    float theta_dot = z_star[5];
+
+    Eigen::Vector2f input_star = GravityCompInput();
+    float u_1 = input_star[0];
+    float u_2 = input_star[1];
+
+    Eigen::MatrixXf A = Eigen::MatrixXf::Zero(6, 6);
+    Eigen::MatrixXf B = Eigen::MatrixXf::Zero(6, 2);
+
+    /* dfi_dzj */
+    A.block(0, 3, 3, 3) = Eigen::MatrixXf::Identity(3, 3);
+    A.block(3, 0, 1, 3) << 0, 0, -(u_1 + u_2) * cos(theta) / m;
+    A.block(4, 0, 1, 3) << 0, 0, -(u_1 + u_2) * sin(theta) / m;
+
+    /* dfi_du_j */
+    B.row(3) = Eigen::Vector2f::Constant(-sin(theta) / m);
+    B.row(4) = Eigen::Vector2f::Constant(cos(theta) / m);
+    B.row(5) = Eigen::Vector2f(r / I, -r / I);
+
+    return std::tuple(A, B);
+}
+
+void PlanarQuadrotor::DoCalcTimeDerivatives() {
+    /* Extract parameters */
+    float m = params[0];
+    float I = params[1];
+    float r = params[2];
+    float g = params[3];
+
+    /* Extract state */
+    float x = z[0];
+    float y = z[1];
+    float theta = z[2];
+    float x_dot = z[3];
+    float y_dot = z[4];
+    float theta_dot = z[5];
+
+    /* Extract propellers actuation */
+    float u_1 = input[0];
+    float u_2 = input[1];
+
+    z_dot.block(0, 0, 3, 1) = z.block(3, 0, 3, 1);
+
+    /* See http://underactuated.mit.edu/acrobot.html#section3 3.3.1 */
+    float x_dotdot = -(u_1 + u_2) * sin(theta) / m;
+    float y_dotdot = (u_1 + u_2) * cos(theta) / m - g;
+    float theta_dotdot = r * (u_1 - u_2) / I;
+
+    z_dot[3] = x_dotdot;
+    z_dot[4] = y_dotdot;
+    z_dot[5] = theta_dotdot;
+}
+
+void PlanarQuadrotor::DoUpdateState(float dt) {
+    z += z_dot * dt;
+}
+
+Eigen::VectorXf PlanarQuadrotor::Update(Eigen::Vector2f& input, float dt) {
+    SetInput(input);
+    DoCalcTimeDerivatives();
+    DoUpdateState(dt);
+
+    // Sprawdź, czy dron się porusza i odpowiednio odtwórz dźwięk
+    if (z_dot.norm() > 0.01f) {
+        SDL_ClearQueuedAudio(device_id); // Wyczyść poprzednią kolejkę audio
+        SDL_QueueAudio(device_id, wav_buffer, wav_length); // Dodaj dźwięk do kolejki
+        SDL_PauseAudioDevice(device_id, 0); // Wznów odtwarzanie audio
+    }
+    else {
+        SDL_PauseAudioDevice(device_id, 1); // Wstrzymaj odtwarzanie audio
+    }
+
+    return z;
+}
+
+Eigen::VectorXf PlanarQuadrotor::Update(float dt) {
+    DoCalcTimeDerivatives();
+    DoUpdateState(dt);
+
+    // Sprawdź, czy dron się porusza i odpowiednio odtwórz dźwięk
+    if (z_dot.norm() > 0.01f) {
+        SDL_ClearQueuedAudio(device_id); // Wyczyść poprzednią kolejkę audio
+        SDL_QueueAudio(device_id, wav_buffer, wav_length); // Dodaj dźwięk do kolejki
+        SDL_PauseAudioDevice(device_id, 0); // Wznów odtwarzanie audio
+    }
+    else {
+        SDL_PauseAudioDevice(device_id, 1); // Wstrzymaj odtwarzanie audio
+    }
+
+    return z;
+}
+
